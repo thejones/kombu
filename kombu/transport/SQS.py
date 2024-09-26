@@ -490,7 +490,10 @@ class Channel(virtual.Channel):
 
     def _message_to_python(self, message, queue_name, q_url):
         body = self._optional_b64_decode(message['Body'].encode())
-        payload = loads(bytes_to_str(body))
+        try:
+            payload = loads(bytes_to_str(body))
+        except (KeyError, ValueError, TypeError):
+            payload = {}
         if queue_name in self._noack_queues:
             q_url = self._new_queue(queue_name)
             self.asynsqs(queue=queue_name).delete_message(
