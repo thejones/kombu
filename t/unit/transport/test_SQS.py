@@ -172,6 +172,7 @@ class test_Channel:
             'queue-2': SQSClientMock(QueueName='queue-2'),
             'queue-3.fifo': SQSClientMock(QueueName='queue-3.fifo')
         }
+        self.predefined_queues_sqs_conn_mocks = predefined_queues_sqs_conn_mocks
 
         def mock_sqs():
             def sqs(self, queue=None):
@@ -225,6 +226,13 @@ class test_Channel:
     def test_region(self):
         _environ = dict(os.environ)
 
+        # Mock boto3 session to avoid using ~/.aws/config
+        self.boto3_patcher = patch('boto3.Session', autospec=True)
+        self.mock_boto3_session = self.boto3_patcher.start()
+
+        # Ensure that any default region or profile isn't loaded from ~/.aws
+        self.mock_boto3_session.return_value.region_name = None
+
         # when the region is unspecified
         connection = Connection(transport=SQS.Transport)
         channel = connection.channel()
@@ -232,25 +240,28 @@ class test_Channel:
         # the default region is us-east-1
         assert channel.region == 'us-east-1'
 
-        # when boto3 picks a region
+        # When boto3 picks a region from the environment
         os.environ['AWS_DEFAULT_REGION'] = 'us-east-2'
+        self.mock_boto3_session.return_value.region_name = 'us-east-2'
         assert boto3.Session().region_name == 'us-east-2'
-        # the default region should match
+
+        # The default region should match
         connection = Connection(transport=SQS.Transport)
         channel = connection.channel()
         assert channel.region == 'us-east-2'
 
-        # when transport_options are provided
+        # When transport_options are provided
         connection = Connection(transport=SQS.Transport, transport_options={
             'region': 'us-west-2'
         })
         channel = connection.channel()
         assert channel.transport_options.get('region') == 'us-west-2'
-        # the specified region should be used
+        # The specified region should be used
         assert connection.channel().region == 'us-west-2'
 
         os.environ.clear()
         os.environ.update(_environ)
+        self.boto3_patcher.stop()
 
     def test_endpoint_url(self):
         url = 'sqs://@localhost:5493'
@@ -412,6 +423,40 @@ class test_Channel:
         for p in json_payloads:
             assert 'properties' in p
 
+    def test_messages_to_python_unknown_source(self):
+        from kombu.asynchronous.aws.sqs.message import Message
+        q_url = self.channel._new_queue(self.queue_name)
+        body = 'the-test-key-body'
+        msg_attrs = {
+            'S3MessageBodyKey': '(the-test-bucket-name)the-test-key-body',
+            'python_test_attr': 'python_test_attr_value'
+        }
+        self.sqs_conn_mock.send_message(
+            q_url,
+            MessageBody=body,
+            MessageAttributes=msg_attrs
+        )
+
+        received_messages = []
+        for m in self.sqs_conn_mock.receive_message(
+            QueueUrl=q_url,
+            MaxNumberOfMessages=1
+        )['Messages']:
+            m['Body'] = Message(body=m['Body']).decode()
+            received_messages.append(m)
+
+        formatted_messages = self.channel._messages_to_python(
+            received_messages,
+            self.queue_name
+        )
+
+        for msg in formatted_messages:
+            delivery_info = msg['properties']['delivery_info']
+
+            assert msg['body'] == body
+            assert delivery_info['sqs_message']['Body'] == body
+            assert delivery_info['sqs_message']['MessageAttributes'] == msg_attrs
+
     def test_put_and_get(self):
         message = 'my test message'
         self.producer.publish(message)
@@ -488,6 +533,7 @@ class test_Channel:
             'MaxNumberOfMessages': SQS.SQS_MAX_MESSAGES,
             'AttributeName.1': 'ApproximateReceiveCount',
             'WaitTimeSeconds': self.channel.wait_time_seconds,
+            'MessageAttributeNames': ['All']
         }
         assert get_list_args[3] == \
             self.channel.sqs().get_queue_url(self.queue_name).url
@@ -774,6 +820,43 @@ class test_Channel:
         channel.connection._deliver.assert_called()
 
         assert len(channel.sqs(queue_name)._queues[queue_name].messages) == 0
+
+    def test_basic_ack_called_with_predefined_queues(self):
+        """Test that basic_ack calls super().basic_ack(delivery_tag) when queue is not in predefined_queues"""
+        connection = Connection(transport=SQS.Transport, transport_options={
+            'predefined_queues': example_predefined_queues,
+        })
+        queue_name = "queue-1"
+
+        channel = connection.channel()
+        exchange = Exchange('test_SQS', type='direct')
+
+        queue = Queue(queue_name, exchange, queue_name)
+        queue(channel).declare()
+
+        message = {
+            'sqs_message': {
+                'ReceiptHandle': '1'
+            },
+            'sqs_queue': queue_name
+        }
+        mock_messages = Mock()
+        mock_messages.delivery_info = message
+        channel.qos.append(mock_messages, 1)
+
+        mock_new_sqs_client = Mock()
+        channel.new_sqs_client = mock_new_sqs_client
+        channel.sqs = SQS_Channel_sqs.__get__(channel, SQS.Channel)
+        channel.sqs().delete_message = Mock()
+
+        channel.basic_ack(1)
+
+        channel.sqs().delete_message.assert_called_with(
+            QueueUrl=message['sqs_queue'],
+            ReceiptHandle=message['sqs_message']['ReceiptHandle']
+        )
+
+        assert {1} == channel.qos._dirty
 
     def test_predefined_queues_backoff_policy(self):
         connection = Connection(transport=SQS.Transport, transport_options={

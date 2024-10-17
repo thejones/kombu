@@ -493,6 +493,7 @@ class Channel(virtual.Channel):
         try:
             payload = loads(bytes_to_str(body))
         except (KeyError, ValueError, TypeError):
+            # body can be a string (Ex. sent by sqs_extended_client for node.js)
             payload = {}
         if queue_name in self._noack_queues:
             q_url = self._new_queue(queue_name)
@@ -660,30 +661,75 @@ class Channel(virtual.Channel):
             message.delivery_info.pop(unwanted_key, None)
         return super()._restore(message)
 
-    def basic_ack(self, delivery_tag, multiple=False):
-        try:
-            message = self.qos.get(delivery_tag).delivery_info
-            sqs_message = message['sqs_message']
-        except KeyError:
-            super().basic_ack(delivery_tag)
-        else:
-            queue = None
-            if 'routing_key' in message:
-                queue = self.canonical_queue_name(message['routing_key'])
 
-            try:
-                self.sqs(queue=queue).delete_message(
-                    QueueUrl=message['sqs_queue'],
-                    ReceiptHandle=sqs_message['ReceiptHandle']
+    def _handle_message_ack(self, delivery_tag):
+        """Handle default acknolwedgement of message."""
+        super().basic_ack(delivery_tag)
+
+    def basic_ack(self, delivery_tag, multiple=False):
+        """Acknowledge message from SQS."""
+        try:
+            message = self._get_message_details(delivery_tag)
+            sqs_queue_name = self._get_queue_name(message)
+        except KeyError:
+            self._handle_message_ack(delivery_tag)
+            return
+
+        queue = self._get_queue_name_if_predefined(message, sqs_queue_name)
+
+        try:
+            self._delete_sqs_message(queue, message)
+        except AccessDeniedQueueException as exception:
+            raise exception
+        except ClientError as exception:
+            self._reject_on_client_error(delivery_tag)
+        else:
+            self._handle_message_ack(delivery_tag)
+
+    def _get_message_details(self, delivery_tag):
+        """Retrieve message details from QoS by delivery tag."""
+        return self.qos.get(delivery_tag).delivery_info
+
+    def _get_queue_name(self, message):
+        """Extract SQS queue name from the queue URL."""
+        if 'sqs_queue' not in message:
+            raise KeyError('Message does not contain a sqs_queue key.')
+
+        if 'sqs_message' not in message:
+            raise KeyError('Message does not contain a sqs_message key.')
+
+        sqs_queue_url = message['sqs_queue']
+        sqs_queue_name = sqs_queue_url.split('/')[-1]
+        return sqs_queue_name
+
+    def _get_queue_name_if_predefined(self, message, sqs_queue_name):
+        """Get queue name if listed in predefined queues, otherwise return None."""
+        if (
+            message.get('sqs_queue') and
+            self.predefined_queues and
+            sqs_queue_name in self.predefined_queues
+        ):
+            return sqs_queue_name
+        return None
+
+    def _delete_sqs_message(self, queue, message):
+        """Delete SQS message with given parameters."""
+        try:
+            self.sqs(queue=queue).delete_message(
+                QueueUrl=message['sqs_queue'],
+                ReceiptHandle=message['sqs_message']['ReceiptHandle']
+            )
+        except ClientError as exception:
+            if exception.response['Error']['Code'] == 'AccessDenied':
+                raise AccessDeniedQueueException(
+                    exception.response["Error"]["Message"]
                 )
-            except ClientError as exception:
-                if exception.response['Error']['Code'] == 'AccessDenied':
-                    raise AccessDeniedQueueException(
-                        exception.response["Error"]["Message"]
-                        )
-                super().basic_reject(delivery_tag)
             else:
-                super().basic_ack(delivery_tag)
+                raise exception
+
+    def _reject_on_client_error(self, delivery_tag):
+        """Handle client errors."""
+        super().basic_reject(delivery_tag)
 
     def _size(self, queue):
         """Return the number of messages in a queue."""
