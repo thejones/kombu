@@ -229,7 +229,8 @@ class test_AsyncSQSConnection(AWSCase):
         self.x.get_list.assert_called_with(
             'ReceiveMessage', {
                 'MaxNumberOfMessages': 4,
-                'AttributeName.1': 'ApproximateReceiveCount'
+                'AttributeName.1': 'ApproximateReceiveCount',
+                'MessageAttributeNames': ['All']
             },
             [('Message', AsyncMessage)],
             'http://aws.com', callback=self.callback,
@@ -250,6 +251,7 @@ class test_AsyncSQSConnection(AWSCase):
                 'MaxNumberOfMessages': 4,
                 'VisibilityTimeout': 3666,
                 'AttributeName.1': 'ApproximateReceiveCount',
+                'MessageAttributeNames': ['All']
             },
             [('Message', AsyncMessage)],
             'http://aws.com', callback=self.callback,
@@ -270,6 +272,7 @@ class test_AsyncSQSConnection(AWSCase):
                 'MaxNumberOfMessages': 4,
                 'WaitTimeSeconds': 303,
                 'AttributeName.1': 'ApproximateReceiveCount',
+                'MessageAttributeNames': ['All']
             },
             [('Message', AsyncMessage)],
             'http://aws.com', callback=self.callback,
@@ -290,6 +293,7 @@ class test_AsyncSQSConnection(AWSCase):
                 'AttributeName.1': 'foo',
                 'AttributeName.2': 'bar',
                 'MaxNumberOfMessages': 4,
+                'MessageAttributeNames': ['All']
             },
             [('Message', AsyncMessage)],
             'http://aws.com', callback=self.callback,
