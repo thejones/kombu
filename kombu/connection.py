@@ -249,7 +249,7 @@ class Connection:
         self.declared_entities.clear()
         self._closed = False
         conn_params = (
-            parse_url(conn_str) if "://" in conn_str else {"hostname": conn_str}  # noqa
+            parse_url(conn_str) if "://" in conn_str else {"hostname": conn_str}
         )
         self._init_params(**dict(self._initial_params, **conn_params))
 
@@ -903,6 +903,10 @@ class Connection:
             if 'connect_retries_timeout' in transport_opts:
                 conn_opts['timeout'] = \
                     transport_opts['connect_retries_timeout']
+            if 'errback' in transport_opts:
+                conn_opts['errback'] = transport_opts['errback']
+            if 'callback' in transport_opts:
+                conn_opts['callback'] = transport_opts['callback']
         return conn_opts
 
     @property
