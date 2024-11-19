@@ -488,6 +488,8 @@ class test_Channel:
             'MaxNumberOfMessages': SQS.SQS_MAX_MESSAGES,
             'AttributeName.1': 'ApproximateReceiveCount',
             'WaitTimeSeconds': self.channel.wait_time_seconds,
+            'AttributeNames': ['All'],
+            'MessageAttributeNames': ['All']
         }
         assert get_list_args[3] == \
             self.channel.sqs().get_queue_url(self.queue_name).url

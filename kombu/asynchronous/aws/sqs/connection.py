@@ -152,7 +152,11 @@ class AsyncSQSConnection(AsyncAWSQueryConnection):
             params.update(attrs)
         if wait_time_seconds is not None:
             params['WaitTimeSeconds'] = wait_time_seconds
-        params['MessageAttributeNames']=['All']
+        # return ALL message data to the user.
+        if 'MessageAttributeNames' not in params:
+            params['MessageAttributeNames'] = ['All']
+        if 'AttributeNames' not in params:
+            params['AttributeNames'] = ['All']
         return self.get_list(
             'ReceiveMessage', params, [('Message', AsyncMessage)],
             queue_url, callback=callback, parent=queue,
