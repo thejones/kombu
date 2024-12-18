@@ -75,8 +75,11 @@ class Message:
         self._decoded_cache = None
         self._state = 'RECEIVED'
         self.accept = accept
+        compression = None
 
-        compression = self.headers.get('compression')
+        if isinstance(self.headers, dict):
+            compression = self.headers.get('compression')
+
         if not self.errors and compression:
             try:
                 body = decompress(body, compression)
