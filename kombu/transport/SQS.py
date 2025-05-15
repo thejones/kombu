@@ -547,14 +547,12 @@ class Channel(virtual.Channel):
         wait_time_seconds: int | None = None
     ):
         """
-        Unified receive_message wrapper for SQS with full attribute support.
+        Unified receive_message wrapper for SQS (boto3.client.SQS) with full attribute support.
 
-        :param queue: generic kombu nomenclature, generally an exchange or queue
-        :param max_number: channel to bind to the entity
-        :param wait_time_seconds: generic kombu nomenclature, generally an exchange or queue
-        :param message_attribute_names: channel to bind to the entity
-        :param message_system_attribute_names: generic kombu nomenclature, generally an exchange or queue
-        :return: the updated entity
+        :param queue: The queue as a string
+        :param max_number_of_messages: Int of max number of messages to receive.
+        :param wait_time_seconds: Int of sqs wait time in seconds.
+        :return: SQS client recieve_message
         """
 
         q_url: str = self._new_queue(queue)
@@ -991,7 +989,7 @@ class Channel(virtual.Channel):
 
         return {
             'MessageAttributeNames': sorted(message_attrs) if message_attrs else None,
-            'MessageSystemAttributeNames': sorted(message_system_attrs) if message_system_attrs else None,
+            'MessageSystemAttributeNames': sorted(message_system_attrs) if message_system_attrs else ['ApproximateReceiveCount'],
         }
 
 class Transport(virtual.Transport):
@@ -1034,20 +1032,20 @@ class Transport(virtual.Transport):
         transport = Transport(
             ...,
             transport_options={
-                'fetch_message_attributes': ["All"],
+                'fetch_message_attributes': ["All"],  # Get all of the MessageSystemAttributeNames (formerly AttributeNames)
             }
         )
-        # with dict specifying system vs. custom attributes
+        # Preffered - A dict specifying system and custom message attributes
         transport = Transport(
             ...,
             transport_options={
                 'fetch_message_attributes': {
-                    'MessageSystemAttributeNames': ["SenderId", "SentTimestamp"], ],
+                    'MessageSystemAttributeNames': ["SenderId", "SentTimestamp"],
                     'MessageAttributeNames': ['S3MessageBodyKey']
                 },
             }
         )
-    .. _Message Attributes: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_ReceiveMessage.html#SQS-ReceiveMessage-request-MessageSystemAttributeNames
+    .. _Message Attributes: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_ReceiveMessage.html#SQS-ReceiveMessage-request-AttributeNames
 
     """  # noqa: E501
 
